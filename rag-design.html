@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>KnowEngine RAG 方案设计</title>
+  <style>
+    :root {
+      --ink: #172a2a;
+      --muted: #4d6461;
+      --paper: #fbfaf6;
+      --white: #fff;
+      --line: #ccd9d4;
+      --wire: #77918a;
+      --accent: #145f4b;
+      --soft: #e8f3ec;
+      --chart: #f3f7f2;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--paper);
+      color: var(--ink);
+      font: 16px/1.75 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    a { color: var(--accent); text-underline-offset: .18em; }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+    p, h1, h2, h3, figure { margin: 0; }
+    code { font: .88em var(--mono); overflow-wrap: anywhere; }
+    strong { font-weight: 700; }
+    section, article { scroll-margin-top: 1.5rem; }
+    .wrap { width: min(1100px, 100% - 72px); margin-inline: auto; }
+
+    .masthead { border-bottom: 1px solid var(--line); }
+    .masthead .wrap {
+      min-height: 64px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px 24px;
+      padding-block: 12px;
+    }
+    .brand { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+    nav { display: flex; flex-wrap: wrap; gap: 6px 24px; font-size: .84rem; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { text-decoration: underline; }
+
+    .hero { padding: 52px 0 40px; }
+    h1, h2 { line-height: 1.25; font-weight: 800; }
+    h1 { font-size: clamp(2.65rem, 6vw, 4.5rem); letter-spacing: -.055em; }
+    .hero p { margin-top: 16px; max-width: 48em; color: var(--muted); font-size: 1.06rem; }
+    .chapter { border-top: 1px solid var(--line); padding: 34px 0 42px; }
+    .chapter-head { margin-bottom: 20px; }
+    h2 { font-size: clamp(1.52rem, 3.15vw, 2.3rem); letter-spacing: -.035em; }
+    .chapter-head p { color: var(--muted); margin-top: 7px; }
+    h3 { font-size: 1.12rem; line-height: 1.45; }
+    .topics { display: grid; grid-template-columns: 1fr 1fr; column-gap: 34px; margin-top: 24px; }
+    .topic { padding: 17px 0; border-top: 1px solid var(--line); }
+    .topic p { margin-top: 7px; }
+    .topic .sources { margin-top: 8px; }
+    .sources { font-size: .79rem; line-height: 1.55; color: var(--muted); }
+    .sources a { display: inline-block; margin-right: 12px; }
+    .example { background: var(--soft); border-left: 3px solid var(--accent); padding: 9px 12px; }
+    .example, .note { font-size: .9rem; }
+    .note { color: var(--muted); }
+
+    .diagram {
+      --gap: 26px;
+      padding: 19px 22px 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--chart);
+    }
+    .diagram figcaption {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 18px;
+      margin-bottom: 14px;
+      font-size: .85rem;
+      font-weight: 700;
+    }
+    .legend { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: .75rem; font-weight: 400; }
+    .legend::before { content: ""; width: 21px; border-top: 1px dashed var(--wire); }
+    .node, .sidecar {
+      display: block;
+      padding: 9px 11px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--white);
+      color: var(--ink);
+      text-align: center;
+      text-decoration: none;
+      line-height: 1.42;
+    }
+    .node strong, .sidecar strong { display: block; font-size: .94rem; }
+    .node small, .sidecar small { display: block; margin-top: 2px; font-size: .76rem; color: var(--muted); }
+    .node.focus { background: var(--soft); border-color: #91b5a6; }
+    a.node:hover, a.sidecar:hover { border-color: var(--accent); }
+    .sidecar { border-style: dashed; padding: 7px 8px; }
+    .sidecar strong { font-size: .8rem; }
+
+    .flow-step { width: min(274px, 100%); margin-inline: auto; }
+    .flow-step .node { padding-block: 7px; }
+    .node.lane-label { background: #e3ece7; border-color: var(--line); }
+    .query-entry { position: relative; }
+    .query-entry .flow-step { width: min(274px, 46%); }
+    .query-cache {
+      position: absolute;
+      top: 50%;
+      left: calc(50% + min(137px, 23%) + 26px);
+      right: 0;
+      max-width: 230px;
+      transform: translateY(-50%);
+    }
+    .query-cache::before {
+      content: "";
+      position: absolute;
+      right: 100%;
+      top: 50%;
+      width: 27px;
+      border-top: 1px dashed var(--wire);
+    }
+    .down {
+      height: 19px;
+      color: var(--accent);
+      text-align: center;
+      font: 1.06rem/19px var(--mono);
+    }
+    .branches { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: var(--gap); position: relative; }
+    .branches::before, .returns::after {
+      content: "";
+      position: absolute;
+      left: calc((100% - 2 * var(--gap)) / 6);
+      right: calc((100% - 2 * var(--gap)) / 6);
+      border-top: 1px solid var(--wire);
+    }
+    .branches::before { top: 0; }
+    .returns::after { bottom: 0; }
+    .branch { display: flex; flex-direction: column; padding-top: 13px; position: relative; }
+    .branch::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 50%;
+      height: 13px;
+      border-left: 1px solid var(--wire);
+    }
+    .branch-tail { flex: 1; position: relative; min-height: 14px; }
+    .branch-tail::before {
+      content: "";
+      position: absolute;
+      height: 100%;
+      left: 50%;
+      border-left: 1px solid var(--wire);
+    }
+    .intake-docs {
+      display: grid;
+      grid-column: span 2;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      column-gap: var(--gap);
+      align-self: start;
+    }
+    .intake-join {
+      position: relative;
+      grid-column: 1 / -1;
+    }
+    .intake-join::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: calc((100% - var(--gap)) / 4);
+      right: calc((100% - var(--gap)) / 4);
+      border-top: 1px solid var(--wire);
+    }
+    .with-aside { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; position: relative; align-items: center; }
+    .with-aside .node { justify-self: stretch; }
+    .flow-aside {
+      position: relative;
+      padding: 5px 6px;
+      border: 1px dashed var(--wire);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: .73rem;
+      line-height: 1.4;
+      text-align: left;
+      background: var(--white);
+    }
+    .flow-aside strong { display: block; color: var(--ink); }
+    .flow-aside::before {
+      content: "";
+      position: absolute;
+      right: 100%;
+      top: 50%;
+      width: 13px;
+      border-top: 1px dashed var(--wire);
+    }
+    .branch .with-aside {
+      display: block;
+      padding-bottom: 6px;
+    }
+    .branch .with-aside .flow-aside {
+      display: block;
+      margin-top: 6px;
+      margin-left: calc(50% + 12px);
+    }
+    .branch .with-aside::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 1px;
+      bottom: 0;
+      border-left: 1px solid var(--wire);
+    }
+    .branch .with-aside .node { position: relative; }
+    .intake-join .with-aside {
+      grid-template-columns: minmax(0, 1fr) min(274px, 48%) minmax(0, 1fr);
+    }
+    .intake-join .with-aside .node { grid-column: 2; }
+    .small-flow-label { display: none; }
+
+    .branches.authorization-pair {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      width: min(680px, 100%);
+      margin-inline: auto;
+    }
+    .authorization-pair::before, .authorization-pair.returns::after {
+      left: calc((100% - var(--gap)) / 4);
+      right: calc((100% - var(--gap)) / 4);
+    }
+    .authorization-pair .node { flex: 1; }
+
+    .table-wrap { overflow-x: auto; margin-top: 8px; }
+    table { border-collapse: collapse; width: 100%; text-align: left; font-size: .9rem; line-height: 1.55; }
+    th, td { vertical-align: top; border-bottom: 1px solid var(--line); padding: 8px 10px; }
+    th { color: var(--accent); background: var(--soft); }
+    .route-table td:first-child, .metric-table td:first-child { width: 31%; }
+    .eval-lead { max-width: 57em; margin-bottom: 15px; }
+    .eval-lead .sources { margin-top: 6px; }
+    .eval-steps { padding-left: 1.4em; margin-block: 8px 0; }
+    .eval-steps li { padding-left: .15em; }
+    .eval-steps li + li { margin-top: 8px; }
+
+    @media screen and (max-width: 760px) {
+      .wrap { width: calc(100% - 40px); }
+      .hero { padding-block: 34px 29px; }
+      .chapter { padding-block: 27px 29px; }
+      .topics { grid-template-columns: 1fr; margin-top: 20px; }
+      .diagram { --gap: 14px; padding: 14px 14px 16px; }
+      .query-cache { left: calc(73% + 10px); }
+      .query-cache::before { width: 11px; }
+      .query-cache strong { font-size: .76rem; }
+      .query-cache small { font-size: .68rem; }
+    }
+
+    @media screen and (max-width: 620px) {
+      .branches, .intake-docs { grid-template-columns: minmax(0, 1fr); }
+      .intake-docs { grid-column: 1; }
+      .intake-docs .branch + .branch { margin-top: 12px; }
+      .branch { padding-top: 0; }
+      .branches::before, .returns::after, .branch::before, .branch-tail, .intake-join::before { display: none; }
+      .authorization-pair .branch { padding-top: 13px; }
+      .authorization-pair::before, .authorization-pair.returns::after,
+      .authorization-pair .branch::before, .authorization-pair .branch-tail { display: block; }
+      .small-flow-label {
+        display: block;
+        padding: 7px 0 5px;
+        color: var(--muted);
+        text-align: center;
+        font-size: .75rem;
+      }
+      .intake-join { margin-top: 8px; }
+      .intake-join .with-aside { gap: 8px; }
+      .intake-join .flow-aside::before { width: 9px; }
+    }
+
+    @media screen and (max-width: 460px) {
+      .wrap { width: calc(100% - 26px); }
+      nav { gap: 5px 13px; }
+      .diagram { --gap: 8px; padding-inline: 9px; }
+      .node { padding-inline: 4px; }
+      .node strong { font-size: .83rem; }
+      .node small { font-size: .69rem; }
+      .sidecar { padding-inline: 4px; }
+      .query-entry .flow-step { width: 44%; }
+      .query-cache { left: calc(72% + 8px); }
+      .query-cache::before { width: 9px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+    @media print {
+      @page { size: A4; margin: 13mm; }
+      * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      body { background: white; font-size: 10.5pt; }
+      .wrap { width: 100%; }
+      .masthead { display: none; }
+      .hero { padding-block: 0 18px; }
+      h1 { font-size: 30pt; }
+      h2 { font-size: 20pt; }
+      .chapter { padding-block: 20px; }
+      .chapter-head { break-after: avoid; }
+      .diagram, .topic, tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <span class="brand">KnowEngine</span>
+      <nav aria-label="章节导航">
+        <a href="#ingestion">文档前置处理</a>
+        <a href="#retrieval">文档检索召回</a>
+        <a href="#authorization">RAG 权限</a>
+        <a href="#evaluation">RAG 评测</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <header class="hero">
+      <h1>RAG 方案设计</h1>
+      <p>以 KnowEngine 为基础，把文档、业务表和关系图谱接到同一问答入口。入库时按资料和用途选择处理方式，提问时按问题选择数据源，再把证据交给模型生成回答。</p>
+    </header>
+
+    <section class="chapter" id="ingestion" aria-labelledby="ingestion-title">
+      <header class="chapter-head">
+        <h2 id="ingestion-title">一、文档前置处理阶段</h2>
+        <p>把文件整理成可检索、可维护的知识，并在入库时保留不同资料的结构。</p>
+      </header>
+
+      <figure class="diagram">
+        <figcaption>按文件类型与用途分流入库 <span class="legend">虚线连接存储旁路</span></figcaption>
+        <div class="flow-step">
+          <a class="node focus" href="#split"><strong>上传文件并选择入库用途</strong><small>文档检索型 · 数据查询型</small></a>
+        </div>
+        <div class="down" aria-hidden="true">↓</div>
+        <p class="small-flow-label">按文件类型与用途选择下列路径</p>
+        <div class="branches">
+          <div class="intake-docs">
+            <div class="branch" role="group" aria-label="普通文档的检索入库">
+              <div class="node lane-label"><strong>普通文档</strong><small>文档检索型</small></div>
+              <div class="down" aria-hidden="true">↓</div>
+              <div class="with-aside">
+                <a class="node focus" href="#mineru"><strong>MinerU 解析</strong><small>PDF / Word → Markdown，已有 Markdown 直通</small></a>
+                <div class="flow-aside"><strong>MinIO</strong>原件、Markdown、配图</div>
+              </div>
+              <div class="down" aria-hidden="true">↓</div>
+              <a class="node focus" href="#split"><strong>自定义文档切分</strong><small>标题 / 智能 / 长度 / 分隔符 / 正则</small></a>
+              <div class="down" aria-hidden="true">↓</div>
+              <a class="node focus" href="#parent-child"><strong>父子分段（按需）</strong><small>超长章节保留父段并拆子段，短段直接入库</small></a>
+              <div class="branch-tail" aria-hidden="true"></div>
+            </div>
+            <div class="branch" role="group" aria-label="表格的文档检索入库">
+              <div class="node lane-label"><strong>Excel / CSV</strong><small>文档检索型</small></div>
+              <div class="down" aria-hidden="true">↓</div>
+              <div class="node"><strong>读取表头和数据行</strong><small>保留列名与行内字段的对应关系</small></div>
+              <div class="down" aria-hidden="true">↓</div>
+              <a class="node focus" href="#split"><strong>Excel 按行切片</strong><small>将表头和值配成键值对，每行一个 Chunk</small></a>
+              <div class="branch-tail" aria-hidden="true"></div>
+            </div>
+            <div class="intake-join">
+              <p class="small-flow-label">普通文档与表格的检索分段在此汇合</p>
+              <div class="down" aria-hidden="true">↓</div>
+              <div class="with-aside">
+                <a class="node focus" href="#storage"><strong>保存 Chunk</strong><small>全部分段与版本信息</small></a>
+                <div class="flow-aside"><strong>MySQL 分段存储</strong>热点修订与版本维护</div>
+              </div>
+              <div class="down" aria-hidden="true">↓</div>
+              <div class="flow-step"><div class="node"><strong>Embedding 向量化</strong><small>异步处理可检索分段，跳过完整父段</small></div></div>
+              <div class="down" aria-hidden="true">↓</div>
+              <div class="flow-step"><a class="node" href="#storage"><strong>写入 Elasticsearch</strong><small>分段正文、向量和检索元数据</small></a></div>
+            </div>
+          </div>
+          <div class="branch" role="group" aria-label="Excel 的结构化数据入库">
+            <div class="node lane-label"><strong>Excel</strong><small>数据查询型</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>解析表头和数据行</strong><small>第一行作表头，其余作为数据</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>生成表结构</strong><small>规范化列名，默认使用 VARCHAR</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#split"><strong>创建或校验 MySQL 业务表</strong><small>首次建表，后续版本校验已有表结构</small></a>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>批量写入行数据</strong><small>已有表通过结构校验后替换旧行</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#routing"><strong>登记表结构与版本</strong><small>写入 table_meta，供 NL2SQL 读取</small></a>
+          </div>
+        </div>
+      </figure>
+
+      <div class="topics">
+        <article class="topic" id="mineru">
+          <h3>MinerU 把复杂版面转为可切分的 Markdown</h3>
+          <p>PDF 和 Word 走 MinerU。服务从解析包提取 Markdown 和配图，上传到 MinIO，并在 Markdown 中回填图片地址和可检索的图片描述。已有 Markdown 走直接处理路径。</p>
+          <p><strong>适合</strong> 扫描件和图文手册。用 <code>#</code>、<code>##</code>、<code>###</code> 表达章、节、小节，标题切分才能沿着章节走。原件层级模糊时，可在入库前整理标题，或选择适合该文档的其他切法。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/MinerUProcessBaseServiceImpl.java">MinerU 解析实现</a></p>
+        </article>
+
+        <article class="topic" id="split">
+          <h3>让上传者选择用途和切分方式</h3>
+          <p><strong>文档检索型</strong> 转换完成后由用户发起切分。技术规范适合按标题，纯文本可按长度，有明确边界的记录可用分隔符或正则，也可选智能切分。Excel / CSV 用表格切分器，例如把一行写成「团队：支付；级别：P1」，再作为文本 Chunk 供检索。</p>
+          <p><strong>数据查询型</strong> Excel 首次按表头建表，列默认用 VARCHAR。后续上传校验表结构，匹配后替换旧行。表结构在 <code>table_meta</code> 登记，由 NL2SQL 在检索阶段读取。服务依赖、负责人等关系数据由独立流程维护到 Neo4j。</p>
+          <p class="sources"><a href="src/main/resources/static/upload.html">上传与切分页面</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/splitter/ExcelSplitter.java">表格切分</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/ExcelProcessServiceImpl.java">表格建表与导数</a></p>
+        </article>
+
+        <article class="topic" id="storage">
+          <h3>Chunk 双写支撑热点更新和版本迭代</h3>
+          <p>切分后先把正文、<code>chunkId</code>、父子关系和版本落到 MySQL。事务提交后异步把可检索分段的正文和向量写入 ES，并回写索引 ID 与状态。ES 承担召回，MySQL 承担编辑、追溯和重建。</p>
+          <p><strong>热点修订</strong> 可独立修改子分段，对已索引子段重建向量，并同步父段、清理父段的 Redis 缓存。<strong>整版迭代</strong> 保留各版分段，新版索引就绪后清理旧索引。文本历史版本重新启用时，可用保留的分段重建索引。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/DocumentProcessServiceImpl.java">分段与版本切换</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/KnowledgeSegmentServiceImpl.java">分段热更新</a></p>
+        </article>
+
+        <article class="topic" id="parent-child">
+          <h3>父子分段兼顾命中精度和上下文</h3>
+          <p>标题切分遇到过长章节时，保存完整章节为父段，并将小段向量化。命中子段后按 <code>parentChunkId</code> 回溯父段，优先读 Redis，缺失时查 MySQL。短章节可直接索引。</p>
+          <p class="example"><strong>例如</strong> 搜索「Go 服务回滚命令」能命中小段，回溯整节后还能看到执行前置条件和回滚后的验证步骤。小段负责定位，父段把同一章节的证据补完整。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/splitter/MarkdownHeaderParentTextSplitter.java">父子切分实现</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineElasticsearchContentRetriever.java">父段回溯</a></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="chapter" id="retrieval" aria-labelledby="retrieval-title">
+      <header class="chapter-head">
+        <h2 id="retrieval-title">二、文档检索召回阶段</h2>
+        <p>识别业务领域，选择能回答该问题的数据源，最后把证据和回答规则交给模型。</p>
+      </header>
+
+      <figure class="diagram">
+        <figcaption>从用户问题到带证据的回答 <span class="legend">虚线表示旁路</span></figcaption>
+        <div class="query-entry">
+          <div class="flow-step"><div class="node"><strong>用户提问</strong><small>未命中缓存时进入主线</small></div></div>
+          <a class="sidecar query-cache" href="#cache"><strong>高频问答缓存</strong><small>首问命中 → 直接返回</small></a>
+        </div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><a class="node focus" href="#intent"><strong>意图识别</strong><small>判断业务领域，提取实体与条件</small></a></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><div class="node"><strong>问题改写</strong><small>补全指代，统一术语与检索条件</small></div></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><a class="node focus" href="#routing"><strong>三源路由</strong><small>按问题选择证据来源</small></a></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <p class="small-flow-label">根据路由选择下列路径</p>
+        <div class="branches returns">
+          <div class="branch" role="group" aria-label="Elasticsearch 文档检索路径">
+            <div class="node lane-label"><strong>Elasticsearch</strong><small>文档检索</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#rerank"><strong>混合检索（HNSW + BM25）</strong><small>语义向量近邻 + 关键词全文，各取候选</small></a>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="with-aside">
+              <a class="node focus" href="#parent-child"><strong>父子分段回溯</strong><small>命中子段时，按 ID 取回完整父段</small></a>
+              <div class="flow-aside"><strong>父段读取</strong>Redis 优先，回源 MySQL</div>
+            </div>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>RRF 候选融合</strong><small>根据两路名次合并和去重</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#rerank"><strong>BGE-Rerank</strong><small>按问题与片段的相关性精排，保留 Top K</small></a>
+            <div class="branch-tail" aria-hidden="true"></div>
+          </div>
+          <div class="branch" role="group" aria-label="MySQL 结构化查询路径">
+            <div class="node lane-label"><strong>MySQL</strong><small>业务表查询</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#routing"><strong>NL2SQL 生成查询</strong><small>使用专用提示词与表结构</small></a>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>执行 SQL</strong><small>行集和统计结果直接送去聚合</small></div>
+            <div class="branch-tail" aria-hidden="true"></div>
+          </div>
+          <div class="branch" role="group" aria-label="Neo4j 图谱查询路径">
+            <div class="node lane-label"><strong>Neo4j</strong><small>图谱关系查询</small></div>
+            <div class="down" aria-hidden="true">↓</div>
+            <a class="node focus" href="#routing"><strong>Text2Cypher 生成查询</strong><small>使用专用提示词与图结构</small></a>
+            <div class="down" aria-hidden="true">↓</div>
+            <div class="node"><strong>执行 Cypher</strong><small>实体和关系路径直接送去聚合</small></div>
+            <div class="branch-tail" aria-hidden="true"></div>
+          </div>
+        </div>
+        <p class="small-flow-label">各路查询结果送入证据聚合</p>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><div class="node"><strong>聚合证据</strong><small>合并文档片段与结构化结果</small></div></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><a class="node focus" href="#intent"><strong>提示词与证据注入</strong><small>按意图选回答规则，加入检索上下文</small></a></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><div class="node"><strong>LLM 生成回答</strong><small>流式输出，并附可用的文档引用</small></div></div>
+      </figure>
+
+      <div class="topics">
+        <article class="topic" id="intent">
+          <h3>意图识别、检索提示词和回答提示词各有职责</h3>
+          <p class="note">源码提供结构化意图和按意图加载提示词的机制。以下用公司知识库说明如何适配。</p>
+          <p><strong>检索前</strong> 识别前端、后端（Java / Go）、业务安全、业务运维、风控安全等领域，并提取服务、版本、环境等条件。「订单服务回滚」可识别为业务运维，再结合会话补全服务名和环境。</p>
+          <p><strong>检索时</strong> 领域可用于限定文档候选范围，改写后的问题用于选数据源。走 SQL 或 Cypher 时，使用该路专用提示词和表或图结构生成查询。</p>
+          <p><strong>生成时</strong> 按意图选系统提示词，再注入检索后的证据。例如让运维回答按「前置条件、操作步骤、验证」组织，Java 回答注明框架及版本，风控安全回答区分策略口径与例外。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/chat/service/ChatApplicationService.java">对话编排</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/ai/service/PromptService.java">提示词选择</a></p>
+        </article>
+
+        <article class="topic" id="routing">
+          <h3>三源路由承接不同的入库方式</h3>
+          <div class="table-wrap">
+            <table class="route-table">
+              <thead><tr><th scope="col">选择</th><th scope="col">适用场景</th></tr></thead>
+              <tbody>
+                <tr><td><strong>ES 文档</strong></td><td>查规范、解释流程、找操作手册。例「前端应用接入 SSO 的步骤是什么？」</td></tr>
+                <tr><td><strong>MySQL</strong></td><td>按明确条件筛选或统计。例「上月各团队的超时工单有多少？」</td></tr>
+                <tr><td><strong>Neo4j</strong></td><td>查实体关系与多跳路径。例「订单服务下线会影响哪些下游？」</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>SQL 或 Cypher 查不到结构化结果时，可回退到 ES 查可用资料。解释性资料可以补充背景，精确数值和依赖路径仍需对应的数据源作证。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineQueryRouter.java">三源路由实现</a></p>
+        </article>
+
+        <article class="topic" id="rerank">
+          <h3>BGE-Rerank 把真正能回答问题的证据排到前面</h3>
+          <p>文档路由使用 Elasticsearch 的向量近邻（HNSW）和全文匹配（默认 BM25）分别召回。两路各自回溯父段后，RRF 按名次合并候选。BGE 再逐对评估「问题与片段」，筛掉弱相关内容。项目用本地 ONNX 做精排，SQL / Cypher 的结构化结果直接进入聚合。</p>
+          <p class="example"><strong>例如</strong> 问「生产发布失败时如何回滚」，召回可能同时找到发布教程和生产回滚手册。精排让写明回滚条件和命令的章节优先进入上下文。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineReRankingContentAggregator.java">融合与精排实现</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineHybridContentAggregator.java">结构化结果聚合</a><a href="https://www.elastic.co/guide/en/elasticsearch/reference/8.19/knn-search.html">ES 向量检索</a><a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">ES 全文评分</a></p>
+        </article>
+
+        <article class="topic" id="cache">
+          <h3>高频文档问答以人工审核后的答案复用</h3>
+          <p>定期按语义整理近七天的高频首问，员工审核后才可发布。ES 匹配相似问法，MySQL 校验发布状态、有效期和来源版本。命中可直接返回审核答案，未命中继续正常召回。</p>
+          <p><strong>适合</strong> 允许公开复用、答案稳定的 FAQ，例如公开的开发者接入入口。引用版本变化、撤销公开权限或答案过期后，缓存停止复用。项目默认关闭此功能。</p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/cache/service/QaCacheService.java">缓存整理、命中与失效</a></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="chapter" id="authorization" aria-labelledby="authorization-title">
+      <header class="chapter-head">
+        <h2 id="authorization-title">三、RAG 权限体系设计</h2>
+        <p>现有代码按访客、车主、客服三档过滤。以下是面向企业知识库的两种扩展方案，均为待实现设计。</p>
+        <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/util/DocumentPermissionUtils.java">现有角色规则</a></p>
+      </header>
+
+      <figure class="diagram">
+        <figcaption>检索前鉴权流程（按部署选择一种授权来源）</figcaption>
+        <div class="flow-step"><div class="node"><strong>登录用户发起提问</strong></div></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="branches authorization-pair returns" role="group" aria-label="根据部署方案使用其中一种授权来源">
+          <div class="branch">
+            <a class="node lane-label" href="#external-authorization"><strong>外部权限体系</strong><small>服务端获取外部系统的授权范围</small></a>
+            <div class="branch-tail" aria-hidden="true"></div>
+          </div>
+          <div class="branch">
+            <a class="node lane-label" href="#local-authorization"><strong>RAG 自建 RBAC</strong><small>从 MySQL 计算用户的授权范围</small></a>
+            <div class="branch-tail" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><div class="node focus"><strong>校验知识库或指定文档的访问权限</strong></div></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="branches authorization-pair" role="group" aria-label="访问权限校验结果">
+          <div class="branch">
+            <div class="node focus"><strong>有权限 · 带条件召回</strong><small>向量和全文检索使用同一可见范围</small></div>
+          </div>
+          <div class="branch">
+            <div class="node"><strong>无权限 · 拒绝返回</strong><small>在召回前结束请求</small></div>
+          </div>
+        </div>
+      </figure>
+
+      <div class="topics">
+        <article class="topic" id="external-authorization">
+          <h3>方案一 · 复用外部权限体系</h3>
+          <p>以禅道为例，RAG 负责切分、向量化和召回。一份知识文档对应一个外部文档 ID，同一文档的所有 Chunk 共用这个 ID。ES 保存正文、向量及过滤所需的 <code>user_id</code>、<code>dept_id</code>、<code>job_level</code> 等元数据。</p>
+          <p>提问时由服务端获取外部授权的知识库、项目或文档范围，再叠加部门和职级条件。部门与职级可由对接的组织目录补齐，授权范围以外部系统为准。</p>
+          <p><strong>优点</strong> 复用已有账号和授权规则，权限管理与 RAG 解耦。<strong>代价</strong> 依赖外部认证与授权服务的可用性。</p>
+        </article>
+
+        <article class="topic" id="local-authorization">
+          <h3>方案二 · RAG 自建数据库 RBAC</h3>
+          <p>MySQL 关联 <code>user</code>、<code>role</code>、<code>dept</code>、<code>document</code>，用用户角色和角色授权关系确定可访问的知识库或文档，再按部门、职级细化范围。</p>
+          <p>沿用 MySQL 与 ES 双维护。MySQL 保存授权规则和文档可见范围，ES 保存用于召回的 Chunk 和权限元数据。每次召回前先查资源权限，无权则直接返回。</p>
+          <p><strong>优点</strong> 认证、授权和检索均可独立运行。<strong>代价</strong> 需要维护组织关系、职级和角色授权，并及时同步调岗、离职等变化。</p>
+        </article>
+      </div>
+
+      <article class="topic">
+        <h3>两种方案共用的文档可见规则</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">可见性 <code>visibility</code></th><th scope="col">在已授权的知识库及资源范围内，谁能看</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">公开 <code>PUBLIC</code></th><td>有该知识库访问权限的用户，可以跨部门阅读。</td></tr>
+              <tr><th scope="row">部门内 <code>DEPT</code></th><td><code>dept_id</code> 在用户授权的部门范围内，且用户职级 <code>≥</code> 文档的最低可见职级。</td></tr>
+              <tr><th scope="row">私密 <code>PRIVATE</code></th><td>仅文档所有者可见，以 <code>user_id</code> 匹配登录身份。上级同样按所有者规则校验。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>职级约定</strong> <code>job_level</code> 使用整数，数值越大职级越高。文档门槛可默认取发布者职级。比如运维职级 5 能看本部门门槛为 3 或 5 的资料，访问其他部门仍需单独授权。</p>
+        <p><strong>撤权处理</strong> 授权不可用时拒绝受限检索。权限收紧后，在片段交给模型前按最新授权复核，并同步更新 ES 元数据、失效关联问答缓存。</p>
+      </article>
+    </section>
+
+    <section class="chapter" id="evaluation" aria-labelledby="evaluation-title">
+      <header class="chapter-head">
+        <h2 id="evaluation-title">四、RAG 的评测方案</h2>
+        <p>用同一批业务问题对比每次改动，分别判断证据有没有找对、答案有没有用对。</p>
+      </header>
+
+      <div class="eval-lead">
+        <p><strong>现有评测入口</strong> KnowEngine 的 <code>GET /dataset/generate</code> 复用 RAG 对话流程，输出 <code>question</code>、<code>answer</code> 和引用文本 <code>references</code>。仓库提供样本生成能力，RAGAS 批量评分属于以下接入设计。</p>
+        <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/controller/DatasetController.java">样本生成接口</a></p>
+      </div>
+
+      <div class="topics">
+        <article class="topic">
+          <h3>改造为可回归的 RAGAS 评测</h3>
+          <ol class="eval-steps">
+            <li><strong>固定题集。</strong> 覆盖文档问答、精确取数、多跳关系，以及无答案和容易混淆的问法。由业务同事标注参考答案、证据和预期数据源。</li>
+            <li><strong>导出实际证据。</strong> 将原问题、模型回答和最终注入的上下文映射到 <code>user_input</code>、<code>response</code>、<code>retrieved_contexts</code>，将人工答案写入 <code>reference</code>。在注入前采集有序上下文，保留 SQL / Cypher 返回的证据，并记录路由和文档版本。</li>
+            <li><strong>离线跑分并回归。</strong> Python 批量调用评测入口，交由 RAGAS 评分。固定题集、知识版本和评委模型，关闭问答缓存对比基础链路。用相同候选对比 BGE 精排开关，并记录端到端 P95 延迟。</li>
+          </ol>
+          <p class="sources"><a href="https://docs.ragas.io/en/stable/howtos/integrations/r2r/#constructing-a-ragas-evaluationdataset">RAGAS 样本字段</a></p>
+        </article>
+
+        <article class="topic">
+          <h3>按指标定位问题</h3>
+          <div class="table-wrap">
+            <table class="metric-table">
+              <thead><tr><th scope="col">指标</th><th scope="col">回答的问题</th></tr></thead>
+              <tbody>
+                <tr><td>Context Recall</td><td>支撑参考答案的必要证据找全了吗？</td></tr>
+                <tr><td>Context Precision</td><td>有用的证据排在前面了吗？</td></tr>
+                <tr><td>Faithfulness</td><td>回答中的说法有检索证据支持吗？</td></tr>
+                <tr><td>Response Relevancy</td><td>回答贴合用户的问题吗？</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>分数据源看分数和失败样例。SQL 另外校验数值和行集，图谱校验实体及路径，路由统计选对数据源的比例。缓存单测命中、误命中和版本变更后的失效。</p>
+          <p class="sources"><a href="https://docs.ragas.io/en/latest/concepts/metrics/available_metrics/">RAGAS 指标说明</a></p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
