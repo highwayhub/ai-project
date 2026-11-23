@@ -60,7 +60,7 @@
     h2 { font-size: clamp(1.52rem, 3.15vw, 2.3rem); letter-spacing: -.035em; }
     .chapter-head p { color: var(--muted); margin-top: 7px; }
     h3 { font-size: 1.12rem; line-height: 1.45; }
-    .topics { display: grid; grid-template-columns: 1fr 1fr; column-gap: 34px; margin-top: 24px; }
+    .topics { margin-top: 24px; }
     .topic { padding: 17px 0; border-top: 1px solid var(--line); }
     .topic p { margin-top: 7px; }
     .topic .sources { margin-top: 8px; }
@@ -253,7 +253,7 @@
       .wrap { width: calc(100% - 40px); }
       .hero { padding-block: 34px 29px; }
       .chapter { padding-block: 27px 29px; }
-      .topics { grid-template-columns: 1fr; margin-top: 20px; }
+      .topics { margin-top: 20px; }
       .diagram { --gap: 14px; padding: 14px 14px 16px; }
       .query-cache { left: calc(73% + 10px); }
       .query-cache::before { width: 11px; }
@@ -350,7 +350,7 @@
               <div class="node lane-label"><strong>普通文档</strong><small>文档检索型</small></div>
               <div class="down" aria-hidden="true">↓</div>
               <div class="with-aside">
-                <a class="node focus" href="#mineru"><strong>MinerU 解析</strong><small>PDF / Word → Markdown，已有 Markdown 直通</small></a>
+                <a class="node focus" href="#mineru"><strong>MinerU 解析</strong><small>PDF、Office、图片等可转为 Markdown，接入范围见下方</small></a>
                 <div class="flow-aside"><strong>MinIO</strong>原件、Markdown、配图</div>
               </div>
               <div class="down" aria-hidden="true">↓</div>
@@ -400,8 +400,17 @@
         <article class="topic" id="mineru">
           <h3>MinerU 把复杂版面转为可切分的 Markdown</h3>
           <p>PDF 和 Word 走 MinerU。服务从解析包提取 Markdown 和配图，上传到 MinIO，并在 Markdown 中回填图片地址和可检索的图片描述。已有 Markdown 走直接处理路径。</p>
+          <p><strong>MinerU 4.x 开源版可解析的格式</strong></p>
+          <ul>
+            <li>PDF（含扫描件）与图片：.pdf、.png、.jpg、.jpeg、.webp、.gif、.bmp、.tiff、.jp2。</li>
+            <li>Office 与富文本：.doc、.docx、.ppt、.pptx、.xls、.xlsx、.rtf。</li>
+            <li>OpenDocument 与版式文档：.odt、.ods、.odp、.epub、.ofd。</li>
+            <li>网页、网页归档与表格文本：.html、.htm、.shtml、.mhtml、.mht、.csv、.tsv。</li>
+          </ul>
+          <p>纯文本 .txt、.md、.markdown、.rst、.tex 可直接读取。项目接入更多格式时，需要按部署版本扩展入库路由并适配解析结果。</p>
+          <p><strong>本地部署与禅道接入方案</strong> 在公司内网运行 MinerU，由同步服务按禅道版本提供的接口或导出方式读取授权范围内的正文与附件。Markdown 正文直接进入切分，富文本正文可导出为 HTML，支持的附件交给内网 MinerU 解析，再切分入库。保留禅道文档 ID、版本、原文链接与可见范围，用于增量更新、引用跳转和检索前的权限过滤。</p>
           <p><strong>适合</strong> 扫描件和图文手册。用 <code>#</code>、<code>##</code>、<code>###</code> 表达章、节、小节，标题切分才能沿着章节走。原件层级模糊时，可在入库前整理标题，或选择适合该文档的其他切法。</p>
-          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/MinerUProcessBaseServiceImpl.java">MinerU 解析实现</a></p>
+          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/document/service/impl/MinerUProcessBaseServiceImpl.java">MinerU 解析实现</a><a href="https://github.com/opendatalab/MinerU#supported-inputs">MinerU 开源版格式与部署</a><a href="https://www.zentao.net/knowledge.html">禅道知识库</a></p>
         </article>
 
         <article class="topic" id="split">
@@ -518,7 +527,16 @@
         <article class="topic" id="rerank">
           <h3>BGE-Rerank 把真正能回答问题的证据排到前面</h3>
           <p>文档路由使用 Elasticsearch 的向量近邻（HNSW）和全文匹配（默认 BM25）分别召回。两路各自回溯父段后，RRF 按名次合并候选。BGE 再逐对评估「问题与片段」，筛掉弱相关内容。项目用本地 ONNX 做精排，SQL / Cypher 的结构化结果直接进入聚合。</p>
-          <p class="example"><strong>例如</strong> 问「生产发布失败时如何回滚」，召回可能同时找到发布教程和生产回滚手册。精排让写明回滚条件和命令的章节优先进入上下文。</p>
+          <div class="example">
+            <p><strong>公司 CI/CD 案例</strong>「我们用 GitLab 管代码，怎么让合并到 <code>main</code> 后，Jenkins 自动构建镜像并部署到测试环境？」</p>
+            <ul>
+              <li>《GitLab CI/CD 快速入门》命中 GitLab、构建和部署等关键词，讲的是 GitLab Runner 的流水线。</li>
+              <li>《Jenkins 生产发布手册》也讲 Jenkins 部署，采用人工审批，目标是生产环境。</li>
+              <li>《研发平台接入指南》解释如何配置 GitLab Webhook，让 <code>main</code> 的 push 事件触发 Jenkins。</li>
+              <li>《测试环境发布规范》解释如何在 Jenkinsfile 中调用公司共享库，构建并推送镜像，再部署到测试环境。</li>
+            </ul>
+            <p>BGE 把完整问题和每段候选原文一起打分，更有机会把说明「GitLab 怎么触发 Jenkins」和「Jenkins 怎么发布到测试环境」的两段证据提到前面。项目精排后最多保留 5 段，排位会影响大模型看到哪些资料。两段证据都需要先被召回。</p>
+          </div>
           <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineReRankingContentAggregator.java">融合与精排实现</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/rag/modules/KnowEngineHybridContentAggregator.java">结构化结果聚合</a><a href="https://www.elastic.co/guide/en/elasticsearch/reference/8.19/knn-search.html">ES 向量检索</a><a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">ES 全文评分</a></p>
         </article>
 
