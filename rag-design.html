@@ -449,9 +449,11 @@
           <a class="sidecar query-cache" href="#cache"><strong>高频问答缓存</strong><small>首问命中 → 直接返回</small></a>
         </div>
         <div class="down" aria-hidden="true">↓</div>
-        <div class="flow-step"><a class="node focus" href="#intent"><strong>意图识别</strong><small>判断业务领域，提取实体与条件</small></a></div>
+        <div class="flow-step"><a class="node focus" href="#intent"><strong>意图识别</strong><small>识别公司知识领域，提取业务对象与条件</small></a></div>
         <div class="down" aria-hidden="true">↓</div>
-        <div class="flow-step"><div class="node"><strong>问题改写</strong><small>补全指代，统一术语与检索条件</small></div></div>
+        <div class="flow-step"><a class="node focus" href="#intent"><strong>装配专家系统提示词</strong><small>按意图设置最终回答的系统消息</small></a></div>
+        <div class="down" aria-hidden="true">↓</div>
+        <div class="flow-step"><div class="node"><strong>问题改写</strong><small>使用改写提示词处理问题与历史消息</small></div></div>
         <div class="down" aria-hidden="true">↓</div>
         <div class="flow-step"><a class="node focus" href="#routing"><strong>三源路由</strong><small>按问题选择证据来源</small></a></div>
         <div class="down" aria-hidden="true">↓</div>
@@ -493,19 +495,22 @@
         <div class="down" aria-hidden="true">↓</div>
         <div class="flow-step"><div class="node"><strong>聚合证据</strong><small>合并文档片段与结构化结果</small></div></div>
         <div class="down" aria-hidden="true">↓</div>
-        <div class="flow-step"><a class="node focus" href="#intent"><strong>提示词与证据注入</strong><small>按意图选回答规则，加入检索上下文</small></a></div>
+        <div class="flow-step"><a class="node focus" href="#intent"><strong>检索证据注入</strong><small>把聚合后的证据加入本轮用户消息</small></a></div>
         <div class="down" aria-hidden="true">↓</div>
         <div class="flow-step"><div class="node"><strong>LLM 生成回答</strong><small>流式输出，并附可用的文档引用</small></div></div>
       </figure>
 
       <div class="topics">
         <article class="topic" id="intent">
-          <h3>意图识别、检索提示词和回答提示词各有职责</h3>
-          <p class="note">源码提供结构化意图和按意图加载提示词的机制。以下用公司知识库说明如何适配。</p>
-          <p><strong>检索前</strong> 识别前端、后端（Java / Go）、业务安全、业务运维、风控安全等领域，并提取服务、版本、环境等条件。「订单服务回滚」可识别为业务运维，再结合会话补全服务名和环境。</p>
-          <p><strong>检索时</strong> 领域可用于限定文档候选范围，改写后的问题用于选数据源。走 SQL 或 Cypher 时，使用该路专用提示词和表或图结构生成查询。</p>
-          <p><strong>生成时</strong> 按意图选系统提示词，再注入检索后的证据。例如让运维回答按「前置条件、操作步骤、验证」组织，Java 回答注明框架及版本，风控安全回答区分策略口径与例外。</p>
-          <p class="sources"><a href="src/main/java/cn/hollis/llm/mentor/know/engine/chat/service/ChatApplicationService.java">对话编排</a><a href="src/main/java/cn/hollis/llm/mentor/know/engine/ai/service/PromptService.java">提示词选择</a></p>
+          <h3>按意图选择专家系统提示词</h3>
+          <p><strong>汽车场景的现有实现</strong> 「售后维修与保养」映射到 <code>CAR_MAINTENANCE</code>。<code>PromptService</code> 加载维修保养模板，设定汽车维修保养技师角色，并规定如何依据资料回答、如何处理资料不足。问答编排在调用 <code>streamChat(...)</code> 前，通过 <code>.systemMessage(prompt)</code> 装配专家提示词，供最终回答使用。进入检索后，问题改写使用独立模板，ES 对传入的 <code>query.text()</code> 做向量编码。等证据聚合完成，<code>DefaultContentInjector</code> 再把证据加入本轮用户消息。</p>
+          <p><strong>公司知识库适配方案</strong> 意图识别覆盖各业务线、业务安全、前端、后端（Java / Go）、开发运维（Jenkins / GitLab）和风控，并提取业务对象、场景、版本或环境。领域可用于缩小文档检索范围，也用于选取回答用的专家模板。SQL 和 Cypher 查询生成各自使用专用提示词。</p>
+          <div class="example">
+            <p><strong>用户问题</strong>「订单同时命中设备异常和地址异常，按公司的规则应该放行还是转人工复核？」识别为「风控 → 订单风控」后，先装配风控专家模板，再按问题执行检索，召回订单风控策略及人工复核 SOP。</p>
+            <p><strong>系统消息示例</strong>「你是公司的风控专家。请依据适用的内部风控策略和处置 SOP 回答问题。核对业务场景、策略版本、命中条件和例外条款，再给出放行、拦截或转人工复核的建议，说明理由并引用条款。若资料不足或条款冲突，列出待核实事项，由有权限的人员确认。禁止编造阈值、规则或审批结果。」</p>
+            <p><strong>本轮用户消息</strong> 原问题加上召回的策略条款和复核 SOP 摘录。例如，若适用条款要求两项异常同时命中时进入人工复核，模型就引用该条款并建议转人工复核。实际处置由业务流程执行。</p>
+          </div>
+          <p class="sources"><a href="../LLMentor/know-engine/src/main/java/cn/hollis/llm/mentor/know/engine/ai/constant/KnowEngineIntent.java">意图与模板映射</a><a href="../LLMentor/know-engine/src/main/java/cn/hollis/llm/mentor/know/engine/ai/service/PromptService.java">模板加载</a><a href="../LLMentor/know-engine/src/main/resources/prompts/car-maintenance-query-prompt.txt">汽车维修保养模板</a><a href="../LLMentor/know-engine/src/main/java/cn/hollis/llm/mentor/know/engine/chat/service/ChatApplicationService.java">系统消息与证据注入</a></p>
         </article>
 
         <article class="topic" id="routing">
